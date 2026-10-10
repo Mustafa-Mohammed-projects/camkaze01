@@ -56,7 +56,7 @@ class VaultTest {
     @Test fun passwordNotStoredAndWeakRejected() {
         vault.create("correct horse".toCharArray())
         assertFalse(cfg.readText().contains("correct horse"))
-        val other = Vault(File.createTempFile("v2", ".cfg").also { it.delete() }, 1000)
+        val other = Vault(File.createTempFile("vault2", ".cfg").also { it.delete() }, 1000)
         assertThrows(IllegalArgumentException::class.java) { other.create("short".toCharArray()) }
     }
 
