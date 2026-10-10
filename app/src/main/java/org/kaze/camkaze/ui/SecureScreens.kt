@@ -1,17 +1,21 @@
 package org.kaze.camkaze.ui
 
+import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -21,6 +25,7 @@ import org.kaze.camkaze.Services
 import org.kaze.camkaze.crypto.Vault
 import org.kaze.camkaze.data.MediaRepo
 import org.kaze.camkaze.data.SecureItem
+import org.kaze.camkaze.data.ShareCache
 import java.text.DateFormat
 import java.util.Date
 
@@ -83,6 +88,9 @@ fun SecureGalleryScreen(state: AppState) {
     var sheetFor by remember { mutableStateOf<SecureItem?>(null) }
     var deleteFor by remember { mutableStateOf<SecureItem?>(null) }
     var detailsFor by remember { mutableStateOf<SecureItem?>(null) }
+    var shareFor by remember { mutableStateOf<SecureItem?>(null) }
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(state.secureVersion) {
         items = withContext(Dispatchers.IO) { try { Services.secure.list() } catch (e: Exception) { emptyList() } }
@@ -118,6 +126,7 @@ fun SecureGalleryScreen(state: AppState) {
     sheetFor?.let { item ->
         ActionSheet(
             actions = listOf(
+                SheetAction("Share as photo", Icons.Filled.Share) { shareFor = item },
                 SheetAction("Delete", Icons.Filled.Delete) { deleteFor = item },
                 SheetAction("Details", Icons.Filled.Info) { detailsFor = item },
             ),
@@ -132,6 +141,30 @@ fun SecureGalleryScreen(state: AppState) {
     detailsFor?.let { item ->
         InfoDialog("Details", secureDetails(item)) { detailsFor = null }
     }
+    shareFor?.let { item ->
+        ConfirmShareDialog(onConfirm = { shareSecure(ctx, scope, state, item) }, onDismiss = { shareFor = null })
+    }
+}
+
+@Composable
+private fun ConfirmShareDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    ConfirmDialog(
+        title = "Share as normal photo?",
+        text = "A decrypted copy will be sent to the app you choose (WhatsApp, Messenger, Bluetooth...). " +
+            "The encrypted original stays in the vault.",
+        confirmLabel = "Share", onConfirm = onConfirm, onDismiss = onDismiss,
+    )
+}
+
+/** Decrypt on a background thread, then open the system share sheet. */
+private fun shareSecure(ctx: Context, scope: CoroutineScope, state: AppState, item: SecureItem) {
+    state.toast("Preparing photo...")
+    scope.launch {
+        val uri = withContext(Dispatchers.IO) {
+            try { ShareCache.export(ctx, item) } catch (e: Exception) { null }
+        }
+        if (uri == null) state.toast("Could not prepare photo") else ShareCache.launch(ctx, uri)
+    }
 }
 
 private fun secureDetails(i: SecureItem): String =
@@ -141,17 +174,25 @@ private fun secureDetails(i: SecureItem): String =
 // ------------------------------------------------------------------ secure viewer
 @Composable
 fun SecureViewerScreen(item: SecureItem, state: AppState) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var bmp by remember(item.id) { mutableStateOf<android.graphics.Bitmap?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var confirmShare by remember { mutableStateOf(false) }
 
     LaunchedEffect(item.id) {
         // Full image is decrypted only now, only in RAM, downscaled to 2048 px.
+        // NOTE: the bitmap is NOT recycled manually: Compose/RenderThread may still draw it
+        // (recycling it here caused the "recycled bitmap" crash). The GC frees it after we leave.
         bmp = withContext(Dispatchers.IO) { try { Services.secure.full(item, 2048) } catch (e: Exception) { null } }
     }
-    DisposableEffect(bmp) { onDispose { bmp?.recycle() } }
 
     ViewerChrome("Secure photo", bmp, onBack = { state.back() }) {
+        IconButton(onClick = { confirmShare = true }) { Icon(Icons.Filled.Share, "Share", tint = SecureAccent) }
         IconButton(onClick = { confirmDelete = true }) { Icon(Icons.Filled.Delete, "Delete", tint = SecureAccent) }
+    }
+    if (confirmShare) {
+        ConfirmShareDialog(onConfirm = { shareSecure(ctx, scope, state, item) }, onDismiss = { confirmShare = false })
     }
     if (confirmDelete) {
         ConfirmDialog("Delete secure photo?", "This encrypted photo will be permanently deleted.",
