@@ -1,6 +1,7 @@
 package org.kaze.camkaze.data
 
 import android.graphics.Bitmap
+import android.media.ExifInterface
 import org.kaze.camkaze.crypto.Vault
 import java.io.File
 import java.security.SecureRandom
@@ -48,6 +49,30 @@ class SecureRepo(private val dir: File, private val vault: Vault) {
     fun full(item: SecureItem, maxSide: Int): Bitmap {
         val p = vault.decrypt(item.file.readBytes())
         try { return Images.decodePayload(p, maxSide) } finally { p.fill(0) }
+    }
+
+    /**
+     * Writes a decrypted, normal-looking JPEG (rotation stored as EXIF) to [target].
+     * Only used for the explicit "share as photo" action.
+     */
+    fun decryptTo(item: SecureItem, target: File) {
+        val p = vault.decrypt(item.file.readBytes())
+        try {
+            target.outputStream().use { it.write(p, Payload.HEADER, p.size - Payload.HEADER) }
+            val orientation = when (Payload.rotation(p)) {
+                90 -> ExifInterface.ORIENTATION_ROTATE_90
+                180 -> ExifInterface.ORIENTATION_ROTATE_180
+                270 -> ExifInterface.ORIENTATION_ROTATE_270
+                else -> ExifInterface.ORIENTATION_NORMAL
+            }
+            try {
+                val exif = ExifInterface(target.absolutePath)
+                exif.setAttribute(ExifInterface.TAG_ORIENTATION, orientation.toString())
+                exif.saveAttributes()
+            } catch (_: Exception) { /* still a valid JPEG */ }
+        } finally {
+            p.fill(0)
+        }
     }
 
     fun delete(item: SecureItem) {
