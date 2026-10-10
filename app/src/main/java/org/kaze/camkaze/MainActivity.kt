@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
+import org.kaze.camkaze.data.ShareCache
 import org.kaze.camkaze.ui.CamKazeApp
 
 class MainActivity : ComponentActivity() {
@@ -17,6 +18,11 @@ class MainActivity : ComponentActivity() {
             override fun onPause(owner: LifecycleOwner) = state.onBackground()
         })
         setContent { CamKazeApp(state) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        ShareCache.purge(this, 10 * 60 * 1000L)
     }
 
     override fun onDestroy() {
